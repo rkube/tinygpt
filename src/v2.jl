@@ -22,6 +22,8 @@ output_interval = 1000
 # Average loss in this window
 avg_interval = 100
 
+n_embed = 32  # Embedding dimension
+
 
 """
     Data loading, tokenizer, pre-processing etc.
@@ -99,14 +101,17 @@ end
 
 
 # Work with embeddings. Define an embedding layer
-emb = Embed(vocab_size, vocab_size)
 
-function bigram_model(x)
-    # Assume that embedding gives the logits, which encode the probability (inverse of sigmoid)
-    # of the next token.
-    # Shape is [vocab_size, block_size, batch_size]
-    emb(x)
-end
+bigram_model = Chain(Embed(n_embed, vocab_size), Dense(n_embed, vocab_size))
+
+#emb = Embed(vocab_size, vocab_size)
+
+#function bigram_model(x)
+#    # Assume that embedding gives the logits, which encode the probability (inverse of sigmoid)
+#    # of the next token.
+#    # Shape is [vocab_size, block_size, batch_size]
+#    emb(x)
+#end
 
 
 function loss(x, y)
@@ -144,16 +149,13 @@ idx = ones(Int, 1, 1)
 decode(generate(idx, 20)[:, 1])
 
 # Now we want to train this model
-
-ps = Flux.params([emb])
+ps = Flux.params(bigram_model)
 opt = AdamW(lr)
 
 for epoch ∈ 1:num_epochs
     xb, yb = get_batch("train")
-
     grad = gradient(() -> loss(xb, yb), ps)
     Flux.update!(opt, ps, grad)
-
     # Estimate losses every output epochs
     if epoch % output_interval == 0
         for split ∈ ["train", "test"]
@@ -163,11 +165,8 @@ for epoch ∈ 1:num_epochs
                 loss_i += loss(xb, yb)
             end
             println("Epoch $(epoch): $(split): loss = $(loss_i / avg_interval)")
-
         end
-
     end
-
 end
 
 idx = ones(Int, 1, 1)
