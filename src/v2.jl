@@ -23,6 +23,7 @@ output_interval = 1000
 avg_interval = 100
 
 n_embed = 32  # Embedding dimension
+head_size = 16
 
 
 """
@@ -51,7 +52,7 @@ encode(s::String) = [stoi[c] for c ∈ s]
 decode(x::AbstractVector{Int}) = String([itos[i] for i ∈ x])
 
 # Encode the entire dataset
-data = encode(s)
+data = encode(s);
 
 # Train-test split
 n_test = Int(round(length(data) * 0.9))
@@ -101,21 +102,50 @@ end
 
 
 # Work with embeddings. Define an embedding layer
+tok_embed = Embed(n_embed, vocab_size)
+pos_embed = Embed(n_embed, block_size)
+lm_head = Dense(n_embed, vocab_size)
 
-bigram_model = Chain(Embed(n_embed, vocab_size), Dense(n_embed, vocab_size))
+function embedding(x)
+    te = tok_embed(x)
+    pe = pos_embed(axes(x, 1))
+    te .+ pe
+end
 
-#emb = Embed(vocab_size, vocab_size)
 
-#function bigram_model(x)
-#    # Assume that embedding gives the logits, which encode the probability (inverse of sigmoid)
-#    # of the next token.
-#    # Shape is [vocab_size, block_size, batch_size]
-#    emb(x)
-#end
+# Self-attention head
+key = Dense(C, n_embed, bias=false)
+query = Dense(C, n_embed, bias=false)
+value = Dense(C, n_embed, bias=false)
+tril_mask = tril(ones(block_size, block_size)) .== 0
+
+function head(x)
+    C, T, B = size(x)
+    #@show C,T,B, size(x)
+    k = key(x) # (head_size, T, B)
+    q = query(x) # (head_size, T, B)
+    v = value(x) # (head_size, T, B)
+    # So far, no communication has happened. To get cross-affinity use batched multiplication from Transformers
+    wts3 = Transformers.batchedmul(q, k, transA=true) ./ sqrt(1f0 * C)
+    
+    wts3[tril_mask[1:T, 1:T], :] .= -1f10
+    wts3 = softmax(wts3; dims=2) # size (T, T, B)
+    
+    out = permutedims(Transformers.batchedmul(wts3, v, transB=true), (2, 1, 3)) #
+end
+
+
+function encoder_forward(idx)
+    x = embedding(idx)
+    x = head(x)
+    lm_head(x)
+end
+
+
 
 
 function loss(x, y)
-    logits = bigram_model(x)
+    logits = encoder_forward(x)
     Flux.Losses.logitcrossentropy(logits, Flux.onehotbatch(y, 1:vocab_size))
 end
 
@@ -131,16 +161,17 @@ function generate(idx, max_new_tokens)
     # idx is the array of indices in the current context.
     # size should be (T, B) T -> block_size (that is sequence length), B -> Batch size
     for dummy ∈ 1:max_new_tokens
-        logits = bigram_model(idx)
-        # Focus only on the last time step
-        logits = logits[:, end, :]  # Now of shape vocab_size(C), B
+        # crop idx to the last block_size tokens
+        idx_cond = size(idx, 1) < block_size ? idx : idx[end-block_size+1:end, :]  # size (T, B)
+        logits = encoder_forward(idx_cond)   # size(logits) = (vocab_size, T, B)
+        # Focus only on the last time step to predict the next token
+        logits = logits[:, end, :]  # size(logits) = (vocab_size, 1, B)
         # Apply softmax to get probabilities
         probs = softmax(logits, dims=1)
-        # a new token from the distribution. Do this for each batch
+        # Append a new token to idx. Do this for each batch
         idx_next = [sample(AnalyticWeights(probs[:, i])) for i ∈ axes(probs, 2)]
         idx = vcat(idx, idx_next')
     end
-
     return idx
 end
 
@@ -149,8 +180,8 @@ idx = ones(Int, 1, 1)
 decode(generate(idx, 20)[:, 1])
 
 # Now we want to train this model
-ps = Flux.params(bigram_model)
-opt = AdamW(lr)
+ps = Flux.params(pos_embed, tok_embed, lm_head)
+opt = ADAM(lr)
 
 for epoch ∈ 1:num_epochs
     xb, yb = get_batch("train")
