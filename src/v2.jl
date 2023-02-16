@@ -4,6 +4,7 @@ using LinearAlgebra
 using StatsBase
 using Transformers
 using Transformers.Basic
+using Zygote
 
 # block size is the length of tokens that are fed into the transformer at once
 # When fed into the transformer, it means that there are block_size examples.
@@ -118,21 +119,19 @@ end
 key = Dense(n_embed, head_size, bias=false)
 query = Dense(n_embed, head_size, bias=false)
 value = Dense(n_embed, head_size, bias=false)
-tril_mask = tril(ones(block_size, block_size)) .== 0
 
 function head(x)
     C, T, B = size(x)
     #@show C,T,B, size(x)
-    k = key(x) # (head_size, T, B)
+    k = key(x) # (head_size, Token, Batch)
     q = query(x) # (head_size, T, B)
     v = value(x) # (head_size, T, B)
     # So far, no communication has happened. To get cross-affinity use batched multiplication from Transformers
-    wts3 = Transformers.batchedmul(q, k, transA=true) ./ sqrt(1f0 * C)
-    
-    wts3[tril_mask[1:T, 1:T], :] .= -1f10
-    wts3 = softmax(wts3; dims=2) # size (T, T, B)
-    
-    out = permutedims(Transformers.batchedmul(wts3, v, transB=true), (2, 1, 3)) #
+    wts = Transformers.batchedmul(q, k, transA=true) ./ sqrt(1f0 * C)   
+    # Now add the mask. Set the upper right triangular part to large negative values
+    wts = wts .+ triu(ones(eltype(wts), T, T), 1) .* -1f10
+    wts = softmax(wts; dims=2) # size (T, T, B)
+    out = permutedims(Transformers.batchedmul(wts, v, transB=true), (2, 1, 3)) #
 end
 
 
@@ -182,7 +181,7 @@ idx = ones(Int, 1, 1)
 decode(generate(idx, 20)[:, 1])
 
 # Now we want to train this model
-ps = Flux.params(pos_embed, tok_embed, lm_head)
+ps = Flux.params(pos_embed, tok_embed, key, query, value, lm_head)
 opt = ADAM(lr)
 
 for epoch ∈ 1:num_epochs
