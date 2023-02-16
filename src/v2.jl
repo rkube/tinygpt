@@ -1,5 +1,6 @@
 # Download and interpret the tiny shakespeare dataset
 using Flux
+using LinearAlgebra
 using StatsBase
 using Transformers
 using Transformers.Basic
@@ -15,15 +16,15 @@ batch_size = 4
 lr = 1e-3
 
 # Number of epochs to train on
-num_epochs = 10_000
+num_epochs = 5_000
 
 # Output interval
-output_interval = 1000
+output_interval = 100
 # Average loss in this window
-avg_interval = 100
+avg_interval = 10
 
 n_embed = 32  # Embedding dimension
-head_size = 16
+head_size = n_embed # Set these equal for now
 
 
 """
@@ -114,9 +115,9 @@ end
 
 
 # Self-attention head
-key = Dense(C, n_embed, bias=false)
-query = Dense(C, n_embed, bias=false)
-value = Dense(C, n_embed, bias=false)
+key = Dense(n_embed, head_size, bias=false)
+query = Dense(n_embed, head_size, bias=false)
+value = Dense(n_embed, head_size, bias=false)
 tril_mask = tril(ones(block_size, block_size)) .== 0
 
 function head(x)
@@ -136,9 +137,10 @@ end
 
 
 function encoder_forward(idx)
-    x = embedding(idx)
-    x = head(x)
-    lm_head(x)
+    # This is the forward pass of the model
+    x = embedding(idx) # Embeddings gives the sum of token and position embedding
+    x = head(x)        # The embeddings are fed into the self-attention head
+    lm_head(x)         # Self-attention output is fed into the head
 end
 
 

@@ -86,9 +86,9 @@ k = key(x) # (head_size, T, B)
 q = query(x) # (head_size, T, B)
 v = value(x) # (head_size, T, B)
 # So far, no communication has happened. To get cross-affinity use batched multiplication from Transformers
-wts3 = Transformers.batchedmul(q, k, transA=true)
+wts3 = Transformers.batchedmul(q, k, transA=true) ./ sqrt(1f0 * head_size)
 # Test output of batched matrix multiplication
-wts3[:,:,1] ≈ q[:,:,1]' * k[:,:,1]
+wts3[:,:,1] ≈ q[:,:,1]' * k[:,:,1] ./ sqrt(1f0 * head_size)
 
 wts3[tril(ones(T, T)) .== 0, :] .= -1f10
 wts3 = softmax(wts3; dims=2) # size (T, T, B)
