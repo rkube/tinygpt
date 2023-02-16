@@ -12,13 +12,10 @@ block_size = 8
 
 # Number of sequences that are trained on in parallel
 batch_size = 4
-
 # Learning rate for optimization
 lr = 1e-3
-
 # Number of epochs to train on
 num_epochs = 5_000
-
 # Output interval
 output_interval = 100
 # Average loss in this window
@@ -110,9 +107,16 @@ e = my_embed(n_embed, vocab_size, block_size)
 sample_ix = rand(1:vocab_size, 20, 1)
 out = e(sample_ix) # size (C, T, B)
 
+# Test if we get the correct parameters
+ps = Flux.params(e)
+length(ps) == 2
+ps[1] == e.te.embedding
+ps[2] == e.pe.embedding
 
 """
     Self-attention head
+
+Stores a key, query and value. These are all just linear layers.
 """
 struct self_attn
     key::Dense
@@ -128,7 +132,7 @@ Flux.trainable(s::self_attn) = (s.key.weight, s.query.weight, s.value.weight)
 """
     self_attn(n_embed, head_size)
 
-Returns a new self-attention head
+Constructor that returns a new self-attention head.
 """
 function self_attn(n_embed, head_size)
     key = Dense(n_embed, head_size, bias=false)
@@ -139,6 +143,11 @@ end
 
 """
     Forward-pass for self-attention
+
+Call this like
+
+> my_sha = self_attn(32, 32)
+> my_sha(out)
 """
 function (sha::self_attn)(x)
     # Get size of data we operate on
@@ -157,9 +166,16 @@ function (sha::self_attn)(x)
 end
 
 
-# test
+# test if output is valid
 my_sha = self_attn(n_embed, n_embed)
 my_sha(out)
+
+# test if parameters are captured correctly
+ps_sha = Flux.params(my_sha)
+# The single-head attention model has 3 parameters: The weight of the key, query, and value mapping
+ps_sha[1] == my_sha.key.weight
+ps_sha[2] == my_sha.query.weight
+ps_sha[3] == my_sha.value.weight
 
 """
     Multi-head attention
@@ -168,6 +184,8 @@ my_sha(out)
 struct multihead_attn
     heads
 end
+
+Flux.@functor multihead_attn
 #Flux.trainable(s::self_attn) = (s.key.weight, s.query.weight, s.value.weight)
 
 
@@ -181,19 +199,28 @@ function (mha::multihead_attn)(x)
     Parallel(vcat, mha.heads...)(x)
 end
 
+# Test if output works
 my_mha = multihead_attn(4, n_embed)
 my_mha(out)
 
+size(my_mha(out)) == (32, 8, 1)
 
+ps_mha = Flux.params(my_mha)
+length(ps_mha) == 3 * length(my_mha.heads) # 3 parameters per self-attention head
+ps_mha[1] == my_mha.heads[1].key.weight
+ps_mha[2] == my_mha.heads[1].query.weight
+ps_mha[3] == my_mha.heads[1].value.weight
+ps_mha[4] == my_mha.heads[2].key.weight
+ps_mha[8] == my_mha.heads[3].query.weight
+ps_mha[12] == my_mha.heads[4].value.weight
 
 model = Chain(my_embed(n_embed, vocab_size, block_size), 
-              #self_attn(n_embed, head_size), 
               multihead_attn(4, n_embed),
               Dense(n_embed, vocab_size))
-              
+
+# Test if we the model accepts token sequences as input
 sample_ix = rand(1:vocab_size, 20, 1)
 model(sample_ix)
-
 
 
 # Calculate loss. Should by -log(1/65)
