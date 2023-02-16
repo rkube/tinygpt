@@ -61,21 +61,6 @@ n_test = Int(round(length(data) * 0.9))
 data_train = data[1:n_test];
 data_test = data[(n_test + 1):end];
 
-# These are `block-size` examples for the transformer
-# 1. Input [19]: 48 is most likely the next token
-# 2. Input [19, 48]: 57 is likely the next token
-# 3. Input [19, 48, 57]: 58 is likely the next token
-# ...
-# 8. Input [19, 48, 57, 58, 59, 2, 16, 48]: 59 is likely the next token
-# Spell this out in code:
-# x = data_train[1:block_size]
-# y = data_train[2:block_size+1]
-# for t ∈ 1:block_size
-#     context = x[1:t]
-#     target = y[t]
-#     println("For input $(context) the target is $(target)")
-# end
-
 
 function get_batch(split)
     data = split == "train" ? data_train : data_test
@@ -88,15 +73,6 @@ function get_batch(split)
     y = reshape(view(data_train, vcat([i+1:i+block_size for i ∈ ix]...)), block_size, batch_size) 
     x, y
 end
-
-# xb, yb = get_batch("train")
-# for b ∈ 1:batch_size
-#     for t ∈ 1:block_size
-#         context = xb[1:t, b]
-#         target = yb[t, b]
-#         println("For input $(context) the target is $(target)")
-#     end
-# end
 
 """
     Embedding
@@ -120,7 +96,6 @@ end
 
 """
     Forward pass 
-
 """
 function (e::my_embed)(idx)
     # Crop the input to the block size. 
@@ -145,7 +120,10 @@ struct self_attn
     value::Dense
 end
 
-Flux.@functor(self_attn)
+# Explicitly define the trainable parameters. Bias are disabled by default
+Flux.trainable(s::self_attn) = (s.key.weight, s.query.weight, s.value.weight)
+
+#Flux.@functor(self_attn)
 
 """
     self_attn(n_embed, head_size)
@@ -179,11 +157,38 @@ function (sha::self_attn)(x)
 end
 
 
+# test
+my_sha = self_attn(n_embed, n_embed)
+my_sha(out)
+
+"""
+    Multi-head attention
+"""
+
+struct multihead_attn
+    heads
+end
+#Flux.trainable(s::self_attn) = (s.key.weight, s.query.weight, s.value.weight)
+
+
+function multihead_attn(num_heads, head_size)
+    hh = [self_attn(head_size, head_size ÷ num_heads) for _ ∈ 1:num_heads]
+    multihead_attn(hh)
+end
+
+function (mha::multihead_attn)(x)
+    # Apply each head in parallel to x. concatenate output.
+    Parallel(vcat, mha.heads...)(x)
+end
+
+my_mha = multihead_attn(4, n_embed)
+my_mha(out)
 
 
 
 model = Chain(my_embed(n_embed, vocab_size, block_size), 
-              self_attn(n_embed, head_size), 
+              #self_attn(n_embed, head_size), 
+              multihead_attn(4, n_embed),
               Dense(n_embed, vocab_size))
               
 sample_ix = rand(1:vocab_size, 20, 1)
@@ -252,4 +257,4 @@ idx = ones(Int, 1, 1)
 println("Output after training for $(num_epochs) epochs:")
 print(decode(generate(idx, 500)[:, 1]))
 
-# After ~20_000 epochs, we get something reasonable-ish....
+# After ~5_000 epochs, we get a loss of about 2.3 - 2.4
