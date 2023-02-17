@@ -4,6 +4,10 @@ using StatsBase
 using Transformers
 using Transformers.Basic
 
+"""
+    Bigram language model. A bit more flux-like.
+"""
+
 # block size is the length of tokens that are fed into the transformer at once
 # When fed into the transformer, it means that there are block_size examples.
 block_size = 8

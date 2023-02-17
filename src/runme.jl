@@ -4,6 +4,11 @@ using StatsBase
 using Transformers
 using Transformers.Basic
 
+"""
+    Basic implementatin of a bigram language model to learn shakespeare
+"""
+
+
 
 s = open("datasets/tiny_shakespeare.txt", "r") do io
     read(io, String)

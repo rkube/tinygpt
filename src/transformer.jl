@@ -6,9 +6,14 @@ using Transformers
 using Transformers.Basic
 using Zygote
 
+"""
+    Basic implementation of transformers with mulit-head self-attention.
+    Custom layers are implemented in a flux-like manner.
+"""
+
 # block size is the length of tokens that are fed into the transformer at once
 # When fed into the transformer, it means that there are block_size examples.
-block_size = 64
+block_size = 128
 
 # Number of sequences that are trained on in parallel
 batch_size = 8
@@ -21,8 +26,8 @@ output_interval = 100
 # Average loss in this window
 avg_interval = 10
 
-n_embed = 128  # Embedding dimension
-n_heads = 4    # n_embed needs to be divisible by n_head
+n_embed = 192  # Embedding dimension
+n_heads = 6    # n_embed needs to be divisible by n_head
 
 
 
