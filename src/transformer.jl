@@ -89,8 +89,10 @@ struct my_embed
 end
 
 # Make this a functor https://fluxml.ai/Functors.jl/stable/#Basic-Usage-and-Implementation
+# This is required so that Flux.params correctly pulls the trainable paramters from my_embed.
 Flux.@functor my_embed
 
+# This is a constructor for `my_embed`
 function my_embed(n_embed::Int, vocab_size::Int, block_size::Int)
     tt = Embed(n_embed, vocab_size)
     pp = Embed(n_embed, block_size)
@@ -99,6 +101,9 @@ end
 
 """
     Forward pass 
+
+Any code, as long as it is differentiable, can be in this function. This corresponds to the `self.forward(x)`
+call in pytorch.
 """
 function (e::my_embed)(idx)
     # Crop the input to the block size. 
@@ -130,15 +135,15 @@ struct self_attn
     value::Dense
 end
 
-# Explicitly define the trainable parameters. Bias are disabled by default
+# Explicitly define that only the weights of the linear projection layers in a 
+# self-attention head are trainable paramters. The biases are disabled in the constructor.
 Flux.trainable(s::self_attn) = (s.key.weight, s.query.weight, s.value.weight)
 
-#Flux.@functor(self_attn)
 
 """
     self_attn(n_embed, head_size)
 
-Constructor that returns a new self-attention head.
+A function that returns a `self_attn` structure.
 """
 function self_attn(n_embed, head_size)
     key = Dense(n_embed, head_size, bias=false)
@@ -190,11 +195,10 @@ ps_sha[3] == my_sha.value.weight
 struct multihead_attn
     heads # A list of self-attention heads.
     proj::Dense # Dense projection layer
-    d::Dropout
+    d::Dropout  # Optional dropout.
 end
 
 Flux.@functor multihead_attn
-#Flux.trainable(s::self_attn) = (s.key.weight, s.query.weight, s.value.weight)
 
 
 function multihead_attn(n_embed, n_heads, head_size)
@@ -282,24 +286,10 @@ model = Chain(my_embed(n_embed, vocab_size, block_size),
               block(n_embed, n_heads),
               Dense(n_embed, vocab_size))
 
-
-
-
-# Remember, the dense layer eventually calculates the logits.
-#model = Chain(my_embed(n_embed, vocab_size, block_size), 
-#              multihead_attn(4, n_embed),     # (C, T, B)
-#              Dense(n_embed, n_embed, relu),  # Adding a feed-forward layer. This applies on a per-token level (time-code 1:25:00). Shape (C, T, B)
-#              Dense(n_embed, vocab_size))
-
 # Test if we the model accepts token sequences as input
 sample_ix = rand(1:vocab_size, 20, 1)
 model(sample_ix)
 
-
-
-
-# Calculate loss. Should by -log(1/65)
-#@show loss(xb, yb), -log(1.0 / 65.0)
 
 # Now define a function that generates a new token.
 # Input is an array of tokens, shape(T, B)
@@ -315,8 +305,7 @@ function generate(idx, max_new_tokens)
         logits = model(idx)   # size(logits) = (vocab_size, T, B)
         # Focus only on the last time step to predict the next token
         logits = logits[:, end, :]  # size(logits) = (vocab_size, 1, B)
-        # Apply softmax to get probabilities
-        probs = softmax(logits, dims=1)
+        probs = softmax(logits, dims=1)         # Apply softmax to get probabilities
         # Append a new token to idx. Do this for each batch
         idx_next = [sample(AnalyticWeights(probs[:, i])) for i ∈ axes(probs, 2)]
         idx = vcat(idx, idx_next')
@@ -325,16 +314,22 @@ function generate(idx, max_new_tokens)
 end
 
 # With this function we can now generate new output
+# Generate 20 tokens from the uninitialized model. This should be random gibberish.
+println("Output of the untrained model:")
 idx = ones(Int, 1, 1)
 decode(generate(idx, 20)[:, 1])
 
+"""
+    loss(x,y)
 
+Calculates cross-entropy loss between the model output and the training text.
+"""
 function loss(x, y)
     logits = model(x)
     Flux.Losses.logitcrossentropy(logits, Flux.onehotbatch(y, 1:vocab_size))
 end
 
-# Now we want to train this model
+# Train the model.
 ps = Flux.params(model)
 opt = ADAM(lr)
 
@@ -361,4 +356,4 @@ idx = ones(Int, 1, 1)
 println("Output after training for $(num_epochs) epochs:")
 print(decode(generate(idx, 500)[:, 1]))
 
-# After ~5_000 epochs, we get a loss of about 2.3 - 2.4
+# End of file transformer.jl
