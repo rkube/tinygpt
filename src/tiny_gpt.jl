@@ -1,5 +1,5 @@
 module tiny_gpt
 
-greet() = print("Hello World!")
+include("dataloading.jl")
 
 end # module tiny_gpt
